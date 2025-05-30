@@ -43,19 +43,17 @@
  * Definition of BaseCache functions.
  */
 #include "mem/cache/base.hh"
-
-#include <iomanip>
-#include <sstream>
-
 #include "base/compiler.hh"
 #include "base/logging.hh"
 #include "debug/Cache.hh"
 #include "debug/CacheComp.hh"
+#include "debug/CacheModified.hh"
 #include "debug/CachePort.hh"
 #include "debug/CacheRepl.hh"
 #include "debug/CacheVerbose.hh"
 #include "debug/HWPrefetch.hh"
 #include "debug/Packet.hh"
+#include "debug/ResponseLat.hh"
 #include "mem/cache/compressors/base.hh"
 #include "mem/cache/mshr.hh"
 #include "mem/cache/prefetch/base.hh"
@@ -65,6 +63,9 @@
 #include "params/BaseCache.hh"
 #include "params/WriteAllocator.hh"
 #include "sim/cur_tick.hh"
+
+#include <iomanip>
+#include <sstream>
 
 namespace gem5
 {
@@ -114,6 +115,24 @@ BaseCache::BaseCache(const BaseCacheParams &p, unsigned blk_size)
       noTargetMSHR(nullptr),
       missCount(p.max_miss_count),
       addrRanges(p.addr_ranges.begin(), p.addr_ranges.end()),
+      wayHitCounter((p.assoc+p.numVictimWays),0),
+      rdLatencies(p.rd_latencies.size() == (p.assoc+p.numVictimWays)
+                     ? p.rd_latencies
+                        : std::vector<Cycles>((p.assoc+p.numVictimWays),
+                         dataLatency)),
+      wdLatencies(p.wd_latencies.size() == (p.assoc+p.numVictimWays)
+                     ? p.wd_latencies
+                        : std::vector<Cycles>((p.assoc+p.numVictimWays),
+                        dataLatency)),
+      rtLatencies(p.rt_latencies.size() == (p.assoc+p.numVictimWays)
+                     ? p.rt_latencies
+                         : std::vector<Cycles>((p.assoc+p.numVictimWays),
+                          lookupLatency)),
+      wtLatencies(p.wt_latencies.size() == (p.assoc+p.numVictimWays)
+                    ? p.wt_latencies
+                        : std::vector<Cycles>((p.assoc+p.numVictimWays),
+                        lookupLatency)),
+      numVictimWays(p.numVictimWays),
       system(p.system),
       stats(*this)
 {
@@ -288,6 +307,10 @@ BaseCache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time)
 
         pkt->makeTimingResponse();
 
+
+        DPRINTF(ResponseLat, "In %s function %s pkt: %s, requestTime: %u,
+        reqtime(cycles): %u  --- 1\n",name(),__func__,
+        pkt->print(), request_time, ticksToCycles(request_time));
         // In this case we are considering request_time that takes
         // into account the delay of the xbar, if any, and just
         // lat, neglecting responseLatency, modelling hit latency
@@ -411,8 +434,8 @@ BaseCache::recvTimingReq(PacketPtr pkt)
     // the delay provided by the crossbar
     Tick forward_time = clockEdge(forwardLatency) + pkt->headerDelay;
 
-    DPRINTF(Packet, "%s has data type %#x\n",__func__,
-        pkt->req->getDataType());
+    // DPRINTF(Packet, "%s has data type %#x\n",__func__,
+    //     pkt->req->getDataType());
 
     if (pkt->cmd == MemCmd::LockedRMWWriteReq) {
         // For LockedRMW accesses, we mark the block inaccessible after the
@@ -436,11 +459,27 @@ BaseCache::recvTimingReq(PacketPtr pkt)
         // Note that lat is passed by reference here. The function
         // access() will set the lat value.
         satisfied = access(pkt, blk, lat, writebacks);
+        stats.cmdStats(pkt)
+                    .accessLatency[pkt->req->requestorId()] +=
+                    lat*clockPeriod();
 
+        Cycles forward_lat(forwardLatency);
+
+         if (blk != nullptr)
+         {
+            forward_lat = rtLatencies[blk->getWay()];
+         }
+         else
+         {
+            forward_lat = *std::max_element(rtLatencies.begin(),
+            rtLatencies.end());
+         }
+        forward_time = clockEdge(forward_lat) + pkt->headerDelay;
         // After the evicted blocks are selected, they must be forwarded
         // to the write buffer to ensure they logically precede anything
         // happening below
-        doWritebacks(writebacks, clockEdge(lat + forwardLatency));
+        //doWritebacks(writebacks, clockEdge(lat + forwardLatency));
+        doWritebacks(writebacks, clockEdge(lat + forward_lat));
     }
 
     // Here we charge the headerDelay that takes into account the latencies
@@ -628,7 +667,18 @@ BaseCache::recvTimingResp(PacketPtr pkt)
         }
     }
 
-    const Tick forward_time = clockEdge(forwardLatency) + pkt->headerDelay;
+        Cycles forward_lat(forwardLatency);
+        if (blk != nullptr)
+         {
+            forward_lat = rtLatencies[blk->getWay()];
+         }
+         else
+         {
+            forward_lat = *std::max_element(rtLatencies.begin(),
+             rtLatencies.end());
+         }
+    // const Tick forward_time = clockEdge(forwardLatency) + pkt->headerDelay;
+    const Tick forward_time = clockEdge(forward_lat) + pkt->headerDelay;
     // copy writebacks to write buffer
     doWritebacks(writebacks, forward_time);
 
@@ -791,33 +841,7 @@ BaseCache::updateBlockData(CacheBlk *blk, const PacketPtr cpkt,
     if (cpkt) {
 
         cpkt->writeDataToBlock(blk->data, blkSize);
-        int offset = cpkt->getOffset(blkSize);
-        DPRINTF(Packet, "blocksize %d and offset %d \n",blkSize,offset);
-
-    std::ostringstream blkStream;
-    for (int i = 0; i < blkSize; ++i) {
-        // Print each byte as a two-digit hexadecimal number
-
-        blkStream << std::hex << std::setw(2)
-                << std::setfill('0')
-                << static_cast<int>(blk->data[i]) << " ";
-    }
-
-        DPRINTF(Packet, "Handling block data: %s\n",blkStream.str().c_str());
-        DPRINTF(Packet, "---Access packet for address %#x \n",cpkt->getAddr());
-        DPRINTF(Packet, "%s for %s %s\n", __func__,
-        cpkt->print(), blk ? "hit " + blk->print() : "miss");
-
-        std::ostringstream oss;
-    // Append packet data to the stream
-        for (int i = 0; i < cpkt->getSize(); ++i) {
-            oss << std::hex << std::setw(2) << std::setfill('0')
-                << static_cast<int>(cpkt->getPtr<uint64_t>()[i]) << " ";
-        }
-    // Convert the stream to a string and print it
-        DPRINTF(Packet, "Handling packet: %s\n", oss.str().c_str());
-        DPRINTF(Packet, "end \n");
-    }
+     }
 
     if (ppDataUpdate->hasListeners()) {
         if (cpkt) {
@@ -1235,19 +1259,61 @@ BaseCache::calculateTagOnlyLatency(const uint32_t delay,
 
 Cycles
 BaseCache::calculateAccessLatency(const CacheBlk* blk, const uint32_t delay,
-                                  const Cycles lookup_lat) const
+                                  const Cycles lookup_lat,
+                                  std::vector<Cycles> waylatencies,
+                                  std::vector<Cycles> taglatencies ) const
 {
     Cycles lat(0);
 
     if (blk != nullptr) {
+
+        int way_index = blk->getWay();
+        //Uncomment below for debugging
+        //if (name().find("l3") != std::string::npos) {
+        //if (name().find("dcache") != std::string::npos) {
+        // Prepare a string with all way latencies
+        // std::ostringstream wayLatenciesStream;
+        // wayLatenciesStream << "[";
+        // for (size_t i = 0; i < waylatencies.size(); ++i) {
+        //     wayLatenciesStream << waylatencies[i];
+        //     if (i < waylatencies.size() - 1) {
+        //         wayLatenciesStream << ", ";
+        //     }
+        // }
+        // wayLatenciesStream << "]";
+
+        // std::ostringstream tagLatenciesStream;
+        // tagLatenciesStream << "[";
+        // for (size_t i = 0; i < taglatencies.size(); ++i) {
+        //     tagLatenciesStream << taglatencies[i];
+        //     if (i < taglatencies.size() - 1) {
+        //         tagLatenciesStream << ", ";
+        //     }
+        // }
+        // tagLatenciesStream << "]";
+
+        // DPRINTF(Packet, " At %s,sequentialAccess %x,lookup_lat: %d,
+        //way index: %d, wayLatencies: %s, tagLatencies: %s,
+        //delay %s\n", name(),sequentialAccess, lookup_lat,
+        //way_index,wayLatenciesStream.str().c_str(),
+        //tagLatenciesStream.str().c_str(), ticksToCycles(delay));
+
+        //}
         // As soon as the access arrives, for sequential accesses first access
         // tags, then the data entry. In the case of parallel accesses the
         // latency is dictated by the slowest of tag and data latencies.
         if (sequentialAccess) {
-            lat = ticksToCycles(delay) + lookup_lat + dataLatency;
+            lat = ticksToCycles(delay) + taglatencies[way_index] +
+            waylatencies[way_index];
         } else {
-            lat = ticksToCycles(delay) + std::max(lookup_lat, dataLatency);
+            lat = ticksToCycles(delay) +
+            std::max(taglatencies[way_index], waylatencies[way_index]);
         }
+        //  if (sequentialAccess) {
+        //     lat = ticksToCycles(delay) + lookup_lat + dataLatency;
+        // } else {
+        //     lat = ticksToCycles(delay) + std::max(lookup_lat, dataLatency);
+        // }
 
         // Check if the block to be accessed is available. If not, apply the
         // access latency on top of when the block is ready to be accessed.
@@ -1281,6 +1347,16 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
     // Access block in the tags
     Cycles tag_latency(0);
     blk = tags->accessBlock(pkt, tag_latency);
+
+//Tag latency has to be set inside accessBlock, remove below if block,once done
+    if (blk != nullptr){
+        tag_latency = rtLatencies[blk->getWay()];
+    }
+    else
+    {
+        tag_latency = *std::max_element(rtLatencies.begin(),
+         rtLatencies.end());
+    }
 
     DPRINTF(Cache, "%s for %s %s\n", __func__, pkt->print(),
             blk ? "hit " + blk->print() : "miss");
@@ -1376,6 +1452,7 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
             if (!blk) {
                 // no replaceable block available: give up, fwd to next level.
                 incMissCount(pkt);
+                //incrementWayMissCounter(pkt,blk,&wayHitCounter);
                 return false;
             }
 
@@ -1411,11 +1488,17 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         DPRINTF(Cache, "%s new state is %s\n", __func__, blk->print());
         incHitCount(pkt);
 
+        incrementWayHitCounter(pkt,blk,&wayHitCounter);
         // When the packet metadata arrives, the tag lookup will be done while
         // the payload is arriving. Then the block will be ready to access as
         // soon as the fill is done
-        blk->setWhenReady(clockEdge(fillLatency) + pkt->headerDelay +
-            std::max(cyclesToTicks(tag_latency), (uint64_t)pkt->payloadDelay));
+        // blk->setWhenReady(clockEdge(fillLatency) + pkt->headerDelay +
+        //     std::max(cyclesToTicks(tag_latency),
+        //(uint64_t)pkt->payloadDelay));
+        //fill latency to wayLatencies[blk->getWay()] in above
+        blk->setWhenReady(clockEdge(wdLatencies[blk->getWay()])
+        + pkt->headerDelay +
+        std::max(cyclesToTicks(tag_latency), (uint64_t)pkt->payloadDelay));
 
         return true;
     } else if (pkt->cmd == MemCmd::CleanEvict) {
@@ -1454,6 +1537,7 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
                     // no replaceable block available: give up, fwd to
                     // next level.
                     incMissCount(pkt);
+                   // incrementWayMissCounter(pkt,blk,&wayHitCounter);
                     return false;
                 }
 
@@ -1486,12 +1570,17 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         DPRINTF(Cache, "%s new state is %s\n", __func__, blk->print());
 
         incHitCount(pkt);
-
+        incrementWayHitCounter(pkt,blk,&wayHitCounter);
         // When the packet metadata arrives, the tag lookup will be done while
         // the payload is arriving. Then the block will be ready to access as
         // soon as the fill is done
-        blk->setWhenReady(clockEdge(fillLatency) + pkt->headerDelay +
-            std::max(cyclesToTicks(tag_latency), (uint64_t)pkt->payloadDelay));
+        // blk->setWhenReady(clockEdge(fillLatency) + pkt->headerDelay +
+        //     std::max(cyclesToTicks(tag_latency),
+        //(uint64_t)pkt->payloadDelay));
+        //fill latency to wayLatencies[blk->getWay()] in above
+        blk->setWhenReady(clockEdge(wdLatencies[blk->getWay()])
+         + pkt->headerDelay +
+          std::max(cyclesToTicks(tag_latency), (uint64_t)pkt->payloadDelay));
 
         // If this a write-through packet it will be sent to cache below
         return !pkt->writeThrough();
@@ -1500,10 +1589,11 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
             blk->isSet(CacheBlk::ReadableBit))) {
         // OK to satisfy access
         incHitCount(pkt);
-
+        incrementWayHitCounter(pkt,blk,&wayHitCounter);
         // Calculate access latency based on the need to access the data array
         if (pkt->isRead()) {
-            lat = calculateAccessLatency(blk, pkt->headerDelay, tag_latency);
+            lat = calculateAccessLatency(blk, pkt->headerDelay, tag_latency,
+            rdLatencies, rtLatencies);
 
             // When a block is compressed, it must first be decompressed
             // before being read. This adds to the access latency.
@@ -1516,7 +1606,6 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
 
         satisfyRequest(pkt, blk);
         maintainClusivity(pkt->fromCache(), blk);
-
         return true;
     }
 
@@ -1524,14 +1613,17 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
     // or have block but need writable
 
     incMissCount(pkt);
+    //incrementWayMissCounter(pkt,blk,&wayHitCounter);
 
-    lat = calculateAccessLatency(blk, pkt->headerDelay, tag_latency);
+    lat = calculateAccessLatency(blk, pkt->headerDelay, tag_latency,
+    wdLatencies,wtLatencies);
 
     if (!blk && pkt->isLLSC() && pkt->isWrite()) {
         // complete miss on store conditional... just give up now
         pkt->req->setExtraData(0);
         return true;
     }
+
 
     return false;
 }
@@ -1638,8 +1730,12 @@ BaseCache::handleFill(PacketPtr pkt, CacheBlk *blk, PacketList &writebacks,
         updateBlockData(blk, pkt, has_old_data);
     }
     // The block will be ready when the payload arrives and the fill is done
-    blk->setWhenReady(clockEdge(fillLatency) + pkt->headerDelay +
-                      pkt->payloadDelay);
+    // blk->setWhenReady(clockEdge(fillLatency) + pkt->headerDelay +
+    //                   pkt->payloadDelay);
+    //Fill latency to wayLatencies[blk->getWay()] in above
+    blk->setWhenReady(clockEdge(wdLatencies[blk->getWay()]) +
+    pkt->headerDelay +
+    pkt->payloadDelay);
 
     return blk;
 }
@@ -2099,7 +2195,9 @@ BaseCache::CacheCmdStats::CacheCmdStats(BaseCache &c,
                ("average " + name + " mshr miss latency").c_str()),
       ADD_STAT(avgMshrUncacheableLatency, statistics::units::Rate<
                     statistics::units::Tick, statistics::units::Count>::get(),
-               ("average " + name + " mshr uncacheable latency").c_str())
+               ("average " + name + " mshr uncacheable latency").c_str()),
+      ADD_STAT(wayhits, statistics::units::Count::get(),
+               ("number of " + name + " wayhits").c_str())
 {
 }
 
@@ -2152,6 +2250,15 @@ BaseCache::CacheCmdStats::regStatsFromParent()
     accesses = hits + misses;
     for (int i = 0; i < max_requestors; i++) {
         accesses.subname(i, system->getRequestorName(i));
+    }
+
+    // Access latency statistics
+    accessLatency
+        .init(max_requestors)
+        .flags(total | nozero | nonan)
+        ;
+    for (int i = 0; i < max_requestors; i++) {
+        accessLatency.subname(i, system->getRequestorName(i));
     }
 
     // miss rate formulas
@@ -2235,6 +2342,19 @@ BaseCache::CacheCmdStats::regStatsFromParent()
     for (int i = 0; i < max_requestors; i++) {
         avgMshrUncacheableLatency.subname(i, system->getRequestorName(i));
     }
+    const int num_ways = cache.wayHitCounter.size();
+     // Initialize wayhits with a size for all requestors and ways
+    wayhits
+        .init(max_requestors * num_ways)
+        .flags(total | nozero | nonan);
+
+    for (int i = 0; i < max_requestors; i++) {
+        for (int j = 0; j < num_ways; j++) {
+            int index = i * num_ways + j;
+            wayhits.subname(index, system->getRequestorName(i)
+            + ".way" + std::to_string(j));
+        }
+    }
 }
 
 BaseCache::CacheStats::CacheStats(BaseCache &c)
@@ -2260,6 +2380,11 @@ BaseCache::CacheStats::CacheStats(BaseCache &c)
              "number of demand (read+write) accesses"),
     ADD_STAT(overallAccesses, statistics::units::Count::get(),
              "number of overall (read+write) accesses"),
+    ADD_STAT(overallAccessLatency, statistics::units::Tick::get(),
+            "number of overall access ticks"),
+    ADD_STAT(overallAvgAccessLatency, statistics::units::Rate<
+                statistics::units::Tick, statistics::units::Count>::get(),
+             "average overall Access latency"),
     ADD_STAT(demandMissRate, statistics::units::Ratio::get(),
              "miss rate for demand accesses"),
     ADD_STAT(overallMissRate, statistics::units::Ratio::get(),
@@ -2314,7 +2439,10 @@ BaseCache::CacheStats::CacheStats(BaseCache &c)
              "number of data expansions"),
     ADD_STAT(dataContractions, statistics::units::Count::get(),
              "number of data contractions"),
-    cmd(MemCmd::NUM_MEM_CMDS)
+    cmd(MemCmd::NUM_MEM_CMDS),
+    ADD_STAT(wayHitCounts, statistics::units::Count::get(),
+            "number of hits per way")
+
 {
     for (int idx = 0; idx < MemCmd::NUM_MEM_CMDS; ++idx)
         cmd[idx].reset(new CacheCmdStats(c, MemCmd(idx).toString()));
@@ -2403,6 +2531,18 @@ BaseCache::CacheStats::regStats()
     overallAccesses = overallHits + overallMisses;
     for (int i = 0; i < max_requestors; i++) {
         overallAccesses.subname(i, system->getRequestorName(i));
+    }
+
+    overallAccessLatency.flags(total | nozero | nonan);
+    overallAccessLatency = SUM_DEMAND(accessLatency) +
+    SUM_NON_DEMAND(accessLatency);
+    for (int i = 0; i < max_requestors; i++) {
+        overallAccessLatency.subname(i, system->getRequestorName(i));
+    }
+    overallAvgAccessLatency.flags(total | nozero | nonan);
+    overallAvgAccessLatency = overallAccessLatency / overallAccesses;
+    for (int i = 0; i < max_requestors; i++) {
+        overallAvgAccessLatency.subname(i, system->getRequestorName(i));
     }
 
     demandMissRate.flags(total | nozero | nonan);
@@ -2543,6 +2683,14 @@ BaseCache::CacheStats::regStats()
 
     dataExpansions.flags(nozero | nonan);
     dataContractions.flags(nozero | nonan);
+
+    wayHitCounts
+    .flags(statistics::nozero)
+    .init(cache.wayHitCounter.size())  // Initialize with the
+    //number of cache
+    .name("way_hit_counts")
+    .desc("Number of hits per way");
+
 }
 
 void

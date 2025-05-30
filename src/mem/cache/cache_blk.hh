@@ -108,6 +108,11 @@ class CacheBlk : public TaggedEntry
      */
     Tick whenReady = 0;
 
+    /**
+     * Flag to indicate if this block is in the victim way
+     */
+    bool isVictim = false;
+
   protected:
     /**
      * Represents that the indicated thread context has a "lock" on

@@ -26,7 +26,8 @@ options = parser.parse_args()
 
 system = System()
 
-binary = "/home/binu/Gem5/gem5_v23.1/program/matmul"
+# binary = "/home/binu/Gem5/gem5_v23.1_copy/gem5_v23.1/program/matmulo0"
+binary = "/home/binu/Gem5/gem5_v23.1_copy/gem5_v23.1/program/simple"
 #binary = "/home/binu/Gem5/gem5-resources/src/spec-2006/benchspec/CPU2006/400.perlbench/exe/perlbench_base.gcc43-64bit"
 #args = "-I. -I./lib attrs.pl"
 
@@ -35,7 +36,7 @@ system.clk_domain.clock = "1GHz"
 system.clk_domain.voltage_domain = VoltageDomain()
 
 system.mem_mode = "timing"
-system.mem_ranges = [AddrRange("512MB")]
+system.mem_ranges = [AddrRange("1GB")]
 
 num_cpus = 1
 system.cpu = [X86TimingSimpleCPU(max_insts_any_thread=100000) for i in range(num_cpus)]

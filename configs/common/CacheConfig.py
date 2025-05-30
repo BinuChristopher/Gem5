@@ -68,16 +68,61 @@ def _get_cache_opts(level, options):
     if hasattr(options, assoc_attr):
         opts["assoc"] = getattr(options, assoc_attr)
 
+    numVictimWays_attr = f"{level}_numVictimWays"
+    if hasattr(options, numVictimWays_attr):
+        opts["numVictimWays"] = getattr(options, numVictimWays_attr)
+
+    sequential_access_attr = f"{level}_sequential_access"
+    if hasattr(options, sequential_access_attr):
+        opts["sequential_access"] = getattr(options, sequential_access_attr)
+
     prefetcher_attr = f"{level}_hwp_type"
     if hasattr(options, prefetcher_attr):
         opts["prefetcher"] = _get_hwp(getattr(options, prefetcher_attr))
+
+    # Tag latency
+    tag_latency_attr = f"{level}_tag_latency"
+    if hasattr(options, tag_latency_attr):
+        opts["tag_latency"] = getattr(options, tag_latency_attr)
+
+    # Data latency
+    data_latency_attr = f"{level}_data_latency"
+    if hasattr(options, data_latency_attr):
+        opts["data_latency"] = getattr(options, data_latency_attr)
+
+    # Way latencies, added directly if present
+    rd_latencies_attr = f"{level}_rd_latencies"
+    if hasattr(options, rd_latencies_attr):
+        rd_latencies = getattr(options, rd_latencies_attr)
+        if rd_latencies is not None:
+            opts["rd_latencies"] = rd_latencies
+
+    wd_latencies_attr = f"{level}_wd_latencies"
+    if hasattr(options, wd_latencies_attr):
+        wd_latencies = getattr(options, wd_latencies_attr)
+        if wd_latencies is not None:
+            opts["wd_latencies"] = wd_latencies
+
+    rt_latencies_attr = f"{level}_rt_latencies"
+    if hasattr(options, rt_latencies_attr):
+        rt_latencies = getattr(options, rt_latencies_attr)
+        if rt_latencies is not None:
+            opts["rt_latencies"] = rt_latencies
+
+    wt_latencies_attr = f"{level}_wt_latencies"
+    if hasattr(options, wt_latencies_attr):
+        wt_latencies = getattr(options, wt_latencies_attr)
+        if wt_latencies is not None:
+            opts["wt_latencies"] = wt_latencies
 
     return opts
 
 
 def config_cache(options, system):
     if options.external_memory_system and (
-        options.caches or options.l2cache or options.l3cache
+        options.caches
+        or options.l2cache
+        #  or options.l3cache
     ):
         print("External caches and internal caches are exclusive options.\n")
         sys.exit(1)
@@ -117,9 +162,15 @@ def config_cache(options, system):
             dcache_class,
             icache_class,
             l2_cache_class,
-            l3_cache_class,
+            # l3_cache_class,
             walk_cache_class,
-        ) = (L1_DCache, L1_ICache, L2Cache, L3Cache, None)
+        ) = (
+            L1_DCache,
+            L1_ICache,
+            L2Cache,
+            # L3Cache,
+            None,
+        )
 
         if ObjectList.cpu_list.get_isa(options.cpu_type) in [
             ISA.X86,
@@ -135,29 +186,38 @@ def config_cache(options, system):
     # minimal so that compute delays do not include memory access latencies.
     # Configure the compulsory L1 caches for the O3CPU, do not configure
     # any more caches.
-    if (options.l2cache or options.l3cache) and options.elastic_trace_en:
+    if (
+        options.l2cache
+        # or options.l3cache
+    ) and options.elastic_trace_en:
         fatal("When elastic trace is enabled, do not configure L2 caches.")
+    if options.l2cache:
+        # if options.l3cache:
+        #     # system.l2 = l2_cache_class(clk_domain=system.cpu_clk_domain,
+        #     #                            size=options.l2_size,
+        #     #                            assoc=options.l2_assoc)
+        #     system.l3 = l3_cache_class(
+        #         clk_domain=system.cpu_clk_domain,
+        #         size=options.l3_size,
+        #         assoc=options.l3_assoc,
+        #         tag_latency=options.l3_tag_latency,
+        #         data_latency=options.l3_data_latency,
+        #         rd_latencies=options.l3_rd_latencies,
+        #         wd_latencies=options.l3_wd_latencies,
+        #         rt_latencies=options.l3_rt_latencies,
+        #         wt_latencies=options.l3_wt_latencies
+        #     )
 
-    if options.l3cache:
-        # system.l2 = l2_cache_class(clk_domain=system.cpu_clk_domain,
-        #                            size=options.l2_size,
-        #                            assoc=options.l2_assoc)
-        system.l3 = l3_cache_class(
-            clk_domain=system.cpu_clk_domain,
-            size=options.l3_size,
-            assoc=options.l3_assoc,
-        )
+        #     # system.tol2bus = L2XBar(clk_domain=system.cpu_clk_domain)
+        #     system.tol3bus = L3XBar(clk_domain=system.cpu_clk_domain)
 
-        # system.tol2bus = L2XBar(clk_domain=system.cpu_clk_domain)
-        system.tol3bus = L3XBar(clk_domain=system.cpu_clk_domain)
+        #     # system.l2.cpu_side = system.tol2bus.master
+        #     # system.l2.mem_side = system.tol3bus.slave
 
-        # system.l2.cpu_side = system.tol2bus.master
-        # system.l2.mem_side = system.tol3bus.slave
+        #     system.l3.cpu_side = system.tol3bus.mem_side_ports
+        #     system.l3.mem_side = system.membus.cpu_side_ports
 
-        system.l3.cpu_side = system.tol3bus.mem_side_ports
-        system.l3.mem_side = system.membus.cpu_side_ports
-
-    elif options.l2cache:
+        # elif options.l2cache:
         # Provide a clock for the L2 and the L1-to-L2 bus here as they
         # are not connected using addTwoLevelCacheHierarchy. Use the
         # same clock as the CPUs.
@@ -165,11 +225,20 @@ def config_cache(options, system):
             clk_domain=system.cpu_clk_domain,
             size=options.l2_size,
             assoc=options.l2_assoc,
+            numVictimWays=options.l2_numVictimWays,
+            tag_latency=options.l2_tag_latency,
+            data_latency=options.l2_data_latency,
+            rd_latencies=options.l2_rd_latencies,
+            wd_latencies=options.l2_wd_latencies,
+            rt_latencies=options.l2_rt_latencies,
+            wt_latencies=options.l2_wt_latencies,
+            sequential_access=options.l2_sequential_access,
         )
 
         system.tol2bus = L2XBar(clk_domain=system.cpu_clk_domain)
         system.l2.cpu_side = system.tol2bus.mem_side_ports
         system.l2.mem_side = system.membus.cpu_side_ports
+        # system.l2.mem_side = system.tol3bus.cpu_side_ports
         if options.l2_hwp_type:
             hwpClass = ObjectList.hwp_list.get(options.l2_hwp_type)
             if system.l2.prefetcher != "Null":
@@ -249,23 +318,31 @@ def config_cache(options, system):
 
             # When connecting the caches, the clock is also inherited
             # from the CPU in question
-            # system.cpu[i].addPrivateSplitL1Caches(icache, dcache,
-            #                                      iwalkcache, dwalkcache)
+            system.cpu[i].addPrivateSplitL1Caches(
+                icache, dcache, iwalkcache, dwalkcache
+            )
 
-            if options.l3cache:
-                l2cache = l2_cache_class(
-                    size=options.l2_size, assoc=options.l2_assoc
-                )
-                #    system.cpu[i].tol2bus = L2XBar()
-                #    system.cpu[i].l2.cpu_side = system.cpu[i].tol2bus.master
-                #    system.cpu[i].l2.mem_side = system.tol3bus.slave
-                system.cpu[i].addTwoLevelCacheHierarchy(
-                    icache, dcache, l2cache, iwalkcache, dwalkcache
-                )
-            else:
-                system.cpu[i].addPrivateSplitL1Caches(
-                    icache, dcache, iwalkcache, dwalkcache
-                )
+            # if options.l3cache:
+            #     l2cache = l2_cache_class(
+            #         size=options.l2_size,
+            #         assoc=options.l2_assoc,
+            #         tag_latency=options.l2_tag_latency,
+            #         data_latency=options.l2_data_latency,
+            #         rd_latencies=options.l2_rd_latencies,
+            #         wd_latencies=options.l2_wd_latencies,
+            #         rt_latencies=options.l2_rt_latencies,
+            #         wt_latencies=options.l2_wt_latencies
+            #     )
+            #     #    system.cpu[i].tol2bus = L2XBar()
+            #     #    system.cpu[i].l2.cpu_side = system.cpu[i].tol2bus.master
+            #     #    system.cpu[i].l2.mem_side = system.tol3bus.slave
+            #     system.cpu[i].addTwoLevelCacheHierarchy(
+            #         icache, dcache, l2cache, iwalkcache, dwalkcache
+            #     )
+            # else:
+            #     system.cpu[i].addPrivateSplitL1Caches(
+            #         icache, dcache, iwalkcache, dwalkcache
+            #     )
 
             if options.memchecker:
                 # The mem_side ports of the caches haven't been connected yet.
@@ -297,14 +374,14 @@ def config_cache(options, system):
                 )
 
         system.cpu[i].createInterruptController()
-
-        if options.l3cache:
-            system.cpu[i].connectAllPorts(
-                system.tol3bus.cpu_side_ports,
-                system.membus.cpu_side_ports,
-                system.membus.mem_side_ports,
-            )
-        elif options.l2cache:
+        if options.l2cache:
+            # if options.l3cache:
+            #     system.cpu[i].connectAllPorts(
+            #         system.tol3bus.cpu_side_ports,
+            #         system.membus.cpu_side_ports,
+            #         system.membus.mem_side_ports,
+            #     )
+            # elif options.l2cache:
             system.cpu[i].connectAllPorts(
                 system.tol2bus.cpu_side_ports,
                 system.membus.cpu_side_ports,

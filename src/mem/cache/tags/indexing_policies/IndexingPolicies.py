@@ -44,6 +44,8 @@ class BaseIndexingPolicy(SimObject):
     # Get the associativity
     assoc = Param.Int(Parent.assoc, "associativity")
 
+    numVictimWays = Param.Int(Parent.numVictimWays, "Number of victim ways")
+
 
 class SetAssociative(BaseIndexingPolicy):
     type = "SetAssociative"

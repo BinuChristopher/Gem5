@@ -48,12 +48,15 @@
 #include <string>
 
 #include "base/intmath.hh"
+#include "debug/CacheInit.hh"
 
 namespace gem5
 {
 
 BaseSetAssoc::BaseSetAssoc(const Params &p)
-    :BaseTags(p), allocAssoc(p.assoc), blks(p.size / p.block_size),
+    :BaseTags(p), allocAssoc((p.assoc + p.numVictimWays)),
+     numVictimWays(p.numVictimWays),
+     blks(numBlocks),
      sequentialAccess(p.sequential_access),
      replacementPolicy(p.replacement_policy)
 {

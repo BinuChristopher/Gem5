@@ -78,6 +78,9 @@ class BaseSetAssoc : public BaseTags
     /** The allocatable associativity of the cache (alloc mask). */
     unsigned allocAssoc;
 
+    /** Number of victim ways). */
+    unsigned numVictimWays;
+
     /** The cache blocks. */
     std::vector<CacheBlk> blks;
 

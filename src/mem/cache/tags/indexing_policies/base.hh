@@ -65,7 +65,8 @@ class ReplaceableEntry;
  */
 class BaseIndexingPolicy : public SimObject
 {
-  protected:
+  // protected:
+  public:
     /**
      * The associativity.
      */
@@ -75,6 +76,8 @@ class BaseIndexingPolicy : public SimObject
      * The number of sets in the cache.
      */
     const uint32_t numSets;
+
+  protected:
 
     /**
      * The amount to shift the address to get the set.

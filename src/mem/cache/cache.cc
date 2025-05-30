@@ -47,6 +47,10 @@
 #include "mem/cache/cache.hh"
 
 #include <cassert>
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+#include <queue>
 
 #include "base/compiler.hh"
 #include "base/logging.hh"
@@ -55,12 +59,18 @@
 #include "debug/Cache.hh"
 #include "debug/CacheTags.hh"
 #include "debug/CacheVerbose.hh"
+#include "debug/CacheModified.hh"
+#include "debug/CacheOutput.hh"
+#include "debug/CacheOutputPretty.hh"
+#include "debug/ResponseLat.hh"
 #include "enums/Clusivity.hh"
 #include "mem/cache/cache_blk.hh"
 #include "mem/cache/mshr.hh"
 #include "mem/cache/tags/base.hh"
 #include "mem/cache/write_queue_entry.hh"
 #include "mem/request.hh"
+#include "mem/packet_access.hh"
+#include "mem/cache/tags/indexing_policies/base.hh"
 #include "params/Cache.hh"
 
 namespace gem5
@@ -177,9 +187,18 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
             BaseCache::evictBlock(old_blk, writebacks);
         }
 
+        Cycles lookupLat = lookupLatency;
+        if (blk != nullptr){
+        lookupLat = rtLatencies[blk->getWay()];
+        }
+        else
+         {
+        lookupLat = *std::max_element(rtLatencies.begin(), rtLatencies.end());
+         }
         blk = nullptr;
         // lookupLatency is the latency in case the request is uncacheable.
-        lat = lookupLatency;
+        //lat = lookupLatency;
+        lat = lookupLat;
         return false;
     }
 
@@ -287,11 +306,24 @@ Cache::recvTimingSnoopResp(PacketPtr pkt)
         return;
     }
 
+    CacheBlk *blk = tags->findBlock(pkt->getAddr(), pkt->isSecure());
+
+    Cycles forward_lat(forwardLatency);
+    if (blk != nullptr)
+    {
+        forward_lat = rtLatencies[blk->getWay()];
+    }
+    else
+    {
+        forward_lat = *std::max_element(rtLatencies.begin(),
+        rtLatencies.end());
+    }
     // forwardLatency is set here because there is a response from an
     // upper level cache.
     // To pay the delay that occurs if the packet comes from the bus,
     // we charge also headerDelay.
-    Tick snoop_resp_time = clockEdge(forwardLatency) + pkt->headerDelay;
+    // Tick snoop_resp_time = clockEdge(forwardLatency) + pkt->headerDelay;
+    Tick snoop_resp_time = clockEdge(forward_lat) + pkt->headerDelay;
     // Reset the timing of the packet.
     pkt->headerDelay = pkt->payloadDelay = 0;
     memSidePort.schedTimingSnoopResp(pkt, snoop_resp_time);
@@ -309,6 +341,31 @@ Cache::promoteWholeLineWrites(PacketPtr pkt)
     }
 }
 
+//FOr debugging
+std::string prev_blk_data_str = "";
+std::string
+printBinary(uint8_t value) {
+    std::string bin_str = "";
+    for (int i = 7; i >= 0; i--) {
+        bin_str += (char)((value & (1 << i)) ? 49 : 48);
+    }
+    return bin_str;
+}
+
+std::string
+spacedOutString(std::string input_string) {
+    std::string spaced_out_str = "";
+    for (int i = 0; i < input_string.length(); i++) {
+        spaced_out_str += input_string[i];
+        if ((i + 1) % 4 == 0) {
+            spaced_out_str += " ";
+        }
+    }
+    return spaced_out_str;
+}
+
+
+
 void
 Cache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time)
 {
@@ -318,6 +375,96 @@ Cache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time)
     assert(!pkt->req->isUncacheable());
 
     BaseCache::handleTimingReqHit(pkt, blk, request_time);
+
+    //Fordebugging
+    if (pkt->isRead() || pkt->isWrite()) {
+        DPRINTF(CacheModified, "Got hit on packet: %#llx |
+         type: %s | size: %d | instruction addr: %#llx |
+          virtual addr: %#llx | physical addr: %#llx\n",
+           pkt->getAddr(), pkt->cmdString(), (int)pkt->getSize(),
+            pkt->req->hasPC() ? pkt->req->getPC() : 0,
+             pkt->req->hasVaddr() ? pkt->req->getVaddr() : 0,
+              pkt->req->hasPaddr() ? pkt->req->getPaddr() : 0);
+        DPRINTF(CacheModified, "Cache line info: tag: %x |
+         set: %d | way: %d | offset: %ld | index: %ld\n",
+          blk->getTag(), (int)blk->getSet(), (int)blk->getWay(),
+           (long)pkt->getOffset(blkSize),
+           ((int)blk->getSet() * (int)tags->indexingPolicy->assoc)
+            + (int)blk->getWay());
+        DPRINTF(CacheModified, "Cache line data before %s (bin): %s\n",
+         pkt->isWrite() ? "write" : pkt->isRead() ? "read" :
+          "other operations", prev_blk_data_str);
+        std::string data_str = "", p_data_str = "",
+         blk_data_str = "";
+
+        // For binary printing
+        uint8_t *pkt_data = pkt->getPtr<uint8_t>();
+        long p_read_end = (long)pkt->getOffset(blkSize);
+        long p_read_start = (long)pkt->getSize() + p_read_end - 1L;
+        for (long i = p_read_start; i >= p_read_end; i--) {
+            data_str +=  printBinary(blk->data[i]);
+        }
+        for (int i = pkt->getSize() - 1; i >= 0; i--) {
+            p_data_str +=  printBinary(pkt_data[i]);
+        }
+        for (int i = (int)blkSize - 1; i >= 0; i--) {
+            blk_data_str +=  printBinary(blk->data[i]);
+        }
+
+        if ((int)pkt->getSize() <= 8) {
+            // For hex printing
+            DPRINTF(CacheModified, "Packet data (hex): %llx\n",
+             std::stoull(p_data_str, nullptr, 2));
+            // For decimal printing
+            DPRINTF(CacheModified, "Packet data (dec): %llu\n",
+             std::stoull(p_data_str, nullptr, 2));
+        }
+        DPRINTF(CacheModified, "Packet data (bin): %s\n",
+         p_data_str);
+        DPRINTF(CacheModified, "Packet data from cache line (bin): %s\n",
+         data_str);
+        if (pkt->isRead()) {
+            DPRINTF(CacheModified, "Cache line data after read (bin): %s\n",
+             blk_data_str);
+            DPRINTF(CacheOutput, "Source: C A: 0 L: %d O: %ld R: %s\n",
+             ((int)blk->getSet() * (int)tags->indexingPolicy->assoc)
+             + (int)blk->getWay(), (long)pkt->getOffset(blkSize),
+             prev_blk_data_str);
+            DPRINTF(CacheOutput, "Source: C A: 1 L: %d O: %ld R: %s\n",
+             ((int)blk->getSet() * (int)tags->indexingPolicy->assoc)
+              + (int)blk->getWay(), (long)pkt->getOffset(blkSize),
+               blk_data_str);
+            DPRINTF(CacheOutput, "Source: P A: 1 L: %d O: %ld R: %s\n",
+             ((int)blk->getSet() * (int)tags->indexingPolicy->assoc) +
+              (int)blk->getWay(), (long)pkt->getOffset(blkSize), p_data_str);
+            DPRINTF(CacheOutputPretty, "Source: C A: 1 L: %d O: %ld R: %s\n",
+             ((int)blk->getSet() * (int)tags->indexingPolicy->assoc) +
+              (int)blk->getWay(), (long)pkt->getOffset(blkSize),
+               spacedOutString(blk_data_str));
+        }
+        else if (pkt->isWrite()) {
+            DPRINTF(CacheModified, "Cache line data after write (bin): %s\n",
+             blk_data_str);
+            DPRINTF(CacheOutput, "Source: C A: 0 L: %d O: %ld W: %s\n",
+             ((int)blk->getSet() * (int)tags->indexingPolicy->assoc) +
+              (int)blk->getWay(), (long)pkt->getOffset(blkSize),
+              prev_blk_data_str);
+            DPRINTF(CacheOutput, "Source: C A: 1 L: %d O: %ld W: %s\n",
+             ((int)blk->getSet() * (int)tags->indexingPolicy->assoc) +
+              (int)blk->getWay(), (long)pkt->getOffset(blkSize),
+              blk_data_str);
+            DPRINTF(CacheOutput, "Source: P A: 1 L: %d O: %ld W: %s\n",
+            ((int)blk->getSet() * (int)tags->indexingPolicy->assoc) +
+            (int)blk->getWay(), (long)pkt->getOffset(blkSize),
+            p_data_str);
+            DPRINTF(CacheOutputPretty, "Source: C A: 1 L: %d O: %ld W: %s\n",
+             ((int)blk->getSet() * (int)tags->indexingPolicy->assoc) +
+              (int)blk->getWay(), (long)pkt->getOffset(blkSize),
+               spacedOutString(blk_data_str));
+        }
+    }
+
+
 }
 
 void
@@ -363,6 +510,17 @@ Cache::handleTimingReqMiss(PacketPtr pkt, CacheBlk *blk, Tick forward_time,
 
         return;
     }
+
+//For debugging
+    DPRINTF(CacheModified, "Got miss on packet: %#llx |
+     type: %s | size: %d | instruction addr: %#llx |
+      virtual addr: %#llx | physical addr: %#llx\n",
+      pkt->getAddr(), pkt->cmdString(), (int)pkt->getSize(),
+       pkt->req->hasPC() ? pkt->req->getPC() : 0,
+        pkt->req->hasVaddr() ? pkt->req->getVaddr() : 0,
+         pkt->req->hasPaddr() ? pkt->req->getPaddr() : 0);
+
+
 
     Addr blk_addr = pkt->getBlockAddr(blkSize);
 
@@ -418,6 +576,33 @@ void
 Cache::recvTimingReq(PacketPtr pkt)
 {
     DPRINTF(CacheTags, "%s tags:\n%s\n", __func__, tags->print());
+
+    //for debugging
+    if (pkt->isRead() || pkt->isWrite()) {
+            DPRINTF(CacheModified, "Got data request on packet: %#llx
+            | type: %s | size: %d | instruction addr: %#llx |
+             virtual addr: %#llx | physical addr: %#llx\n",
+              pkt->getAddr(), pkt->cmdString(), (int)pkt->getSize(),
+               pkt->req->hasPC() ? pkt->req->getPC() : 0,
+                pkt->req->hasVaddr() ? pkt->req->getVaddr() : 0,
+                 pkt->req->hasPaddr() ? pkt->req->getPaddr() : 0);
+            prev_blk_data_str = "";
+            CacheBlk* blk = tags->findBlock(pkt->getAddr(), pkt->isSecure());
+            if (!(blk && blk->isValid())) {
+                std::vector<CacheBlk*> evict_blks;
+                blk = tags->findVictim(pkt->getAddr(),
+                pkt->isSecure(), blkSize, evict_blks);
+            }
+            if (blk && blk->isValid()) {
+                for (int i = (int)blkSize - 1; i >= 0; i--) {
+                    prev_blk_data_str +=  printBinary(blk->data[i]);
+                }
+            }
+            else {
+                for (int i = 0; i < blkSize; i++) prev_blk_data_str += '0';
+            }
+        }
+
 
     promoteWholeLineWrites(pkt);
 
@@ -1030,10 +1215,24 @@ Cache::doTimingSupplyResponse(PacketPtr req_pkt, const uint8_t *blk_data,
         // but must immediately invalidate it.
         pkt->cmd = MemCmd::ReadRespWithInvalidate;
     }
+
+    CacheBlk *blk = tags->findBlock(pkt->getAddr(), pkt->isSecure());
+
+    Cycles forward_lat(forwardLatency);
+    if (blk != nullptr)
+    {
+        forward_lat = rtLatencies[blk->getWay()];
+    }
+    else
+    {
+        forward_lat = *std::max_element(rtLatencies.begin(),
+         rtLatencies.end());
+    }
     // Here we consider forward_time, paying for just forward latency and
     // also charging the delay provided by the xbar.
     // forward_time is used as send_time in next allocateWriteBuffer().
-    Tick forward_time = clockEdge(forwardLatency) + pkt->headerDelay;
+    // Tick forward_time = clockEdge(forwardLatency) + pkt->headerDelay;
+    Tick forward_time = clockEdge(forward_lat) + pkt->headerDelay;
     // Here we reset the timing of the packet.
     pkt->headerDelay = pkt->payloadDelay = 0;
     DPRINTF(CacheVerbose, "%s: created response: %s tick: %lu\n", __func__,
@@ -1128,7 +1327,23 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
             if (is_timing) {
                 // anything that is merely forwarded pays for the forward
                 // latency and the delay provided by the crossbar
-                Tick forward_time = clockEdge(forwardLatency) +
+
+
+                 Cycles forward_lat(forwardLatency);
+
+                if (blk != nullptr)
+                {
+                    forward_lat = rtLatencies[blk->getWay()];
+                }
+                else
+                {
+                    forward_lat = *std::max_element(rtLatencies.begin(),
+                    rtLatencies.end());
+                }
+
+                // Tick forward_time = clockEdge(forwardLatency) +
+                //     pkt->headerDelay;
+                  Tick forward_time = clockEdge(forward_lat) +
                     pkt->headerDelay;
                 doWritebacks(writebacks, forward_time);
             } else {
@@ -1273,13 +1488,22 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
     Addr blk_addr = pkt->getBlockAddr(blkSize);
     MSHR *mshr = mshrQueue.findMatch(blk_addr, is_secure);
 
+    //check if block exists and get the tag latency per way index
+
     // Update the latency cost of the snoop so that the crossbar can
     // account for it. Do not overwrite what other neighbouring caches
     // have already done, rather take the maximum. The update is
     // tentative, for cases where we return before an upward snoop
     // happens below.
-    pkt->snoopDelay = std::max<uint32_t>(pkt->snoopDelay,
-                                         lookupLatency * clockPeriod());
+    Cycles lookupLat = lookupLatency;
+    if (blk != nullptr){
+        lookupLat = rtLatencies[blk->getWay()];
+        }
+
+     pkt->snoopDelay = std::max<uint32_t>(pkt->snoopDelay,
+                                         lookupLat * clockPeriod());
+    // pkt->snoopDelay = std::max<uint32_t>(pkt->snoopDelay,
+    //                                      lookupLatency * clockPeriod());
 
     // Inform request(Prefetch, CleanEvict or Writeback) from below of
     // MSHR hit, set setBlockCached.
@@ -1371,8 +1595,11 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
 
     // Override what we did when we first saw the snoop, as we now
     // also have the cost of the upwards snoops to account for
-    pkt->snoopDelay = std::max<uint32_t>(pkt->snoopDelay, snoop_delay +
-                                         lookupLatency * clockPeriod());
+
+     pkt->snoopDelay = std::max<uint32_t>(pkt->snoopDelay, snoop_delay +
+                                         lookupLat * clockPeriod());
+    // pkt->snoopDelay = std::max<uint32_t>(pkt->snoopDelay, snoop_delay +
+    //                                      lookupLatency * clockPeriod());
 }
 
 Tick
@@ -1385,7 +1612,13 @@ Cache::recvAtomicSnoop(PacketPtr pkt)
 
     CacheBlk *blk = tags->findBlock(pkt->getAddr(), pkt->isSecure());
     uint32_t snoop_delay = handleSnoop(pkt, blk, false, false, false);
-    return snoop_delay + lookupLatency * clockPeriod();
+    Cycles lookupLat = lookupLatency;
+    if (blk != nullptr){
+        lookupLat = rtLatencies[blk->getWay()];
+        }
+
+    return snoop_delay + lookupLat * clockPeriod();
+    // return snoop_delay + lookupLatency * clockPeriod();
 }
 
 bool

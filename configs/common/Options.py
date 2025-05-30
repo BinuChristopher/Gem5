@@ -190,15 +190,149 @@ def addNoISAOptions(parser):
     parser.add_argument("--num-dirs", type=int, default=1)
     parser.add_argument("--num-l2caches", type=int, default=1)
     parser.add_argument("--num-l3caches", type=int, default=1)
-    parser.add_argument("--l1d_size", type=str, default="64kB")
-    parser.add_argument("--l1i_size", type=str, default="32kB")
-    parser.add_argument("--l2_size", type=str, default="2MB")
+    parser.add_argument("--l1d_size", type=str, default="12kB")
+    parser.add_argument("--l1i_size", type=str, default="12kB")
+    parser.add_argument("--l2_size", type=str, default="256kB")
     parser.add_argument("--l3_size", type=str, default="16MB")
     parser.add_argument("--l1d_assoc", type=int, default=2)
     parser.add_argument("--l1i_assoc", type=int, default=2)
     parser.add_argument("--l2_assoc", type=int, default=8)
     parser.add_argument("--l3_assoc", type=int, default=16)
     parser.add_argument("--cacheline_size", type=int, default=64)
+    parser.add_argument("--l2_numVictimWays", type=int, default=0)
+    parser.add_argument("--l2_sequential_access", type=Bool, default=False)
+
+    # # Way latencies for each level, with variable length depending on associativity
+    # Read data latencies per way rd
+    parser.add_argument(
+        "--l1i_rd_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L1i cache, length must match L1i associativity",
+    )
+    parser.add_argument(
+        "--l1d_rd_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L1d cache, length must match L1d associativity",
+    )
+    parser.add_argument(
+        "--l2_rd_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L2 cache, length must match L2 associativity",
+    )
+    parser.add_argument(
+        "--l3_rd_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L3 cache, length must match L3 associativity",
+    )
+    # Write data latencies per way wd
+    parser.add_argument(
+        "--l1i_wd_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L1i cache, length must match L1i associativity",
+    )
+    parser.add_argument(
+        "--l1d_wd_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L1d cache, length must match L1d associativity",
+    )
+    parser.add_argument(
+        "--l2_wd_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L2 cache, length must match L2 associativity",
+    )
+    parser.add_argument(
+        "--l3_wd_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L3 cache, length must match L3 associativity",
+    )
+
+    # Write tag latencies per way wt
+    parser.add_argument(
+        "--l1i_wt_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L1i cache, length must match L1i associativity",
+    )
+    parser.add_argument(
+        "--l1d_wt_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L1d cache, length must match L1d associativity",
+    )
+    parser.add_argument(
+        "--l2_wt_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L2 cache, length must match L2 associativity",
+    )
+    parser.add_argument(
+        "--l3_wt_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L3 cache, length must match L3 associativity",
+    )
+
+    # Read tag latencies per way rt
+    parser.add_argument(
+        "--l1i_rt_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L1i cache, length must match L1i associativity",
+    )
+    parser.add_argument(
+        "--l1d_rt_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L1d cache, length must match L1d associativity",
+    )
+    parser.add_argument(
+        "--l2_rt_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L2 cache, length must match L2 associativity",
+    )
+    parser.add_argument(
+        "--l3_rt_latencies",
+        type=int,
+        nargs="+",
+        default=[0],
+        help="Way latencies for L3 cache, length must match L3 associativity",
+    )
+
+    ## Tag latency
+    parser.add_argument("--l1i_tag_latency", type=int, default=2)
+    parser.add_argument("--l1d_tag_latency", type=int, default=2)
+    parser.add_argument("--l2_tag_latency", type=int, default=2)
+    parser.add_argument("--l3_tag_latency", type=int, default=2)
+
+    ## Data latency
+    parser.add_argument("--l1i_data_latency", type=int, default=4)
+    parser.add_argument("--l1d_data_latency", type=int, default=4)
+    parser.add_argument("--l2_data_latency", type=int, default=4)
+    parser.add_argument("--l3_data_latency", type=int, default=4)
 
     # Enable Ruby
     parser.add_argument("--ruby", action="store_true")

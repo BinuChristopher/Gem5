@@ -86,8 +86,16 @@ class BaseCache(ClockedObject):
     size = Param.MemorySize("Capacity")
     assoc = Param.Unsigned("Associativity")
 
+    numVictimWays = Param.Unsigned(0, "Number of victim ways")
+
     tag_latency = Param.Cycles("Tag lookup latency")
     data_latency = Param.Cycles("Data access latency")
+    rd_latencies = VectorParam.Cycles([], "Read data access latencies per way")
+    wd_latencies = VectorParam.Cycles(
+        [], "Write data access latencies per way"
+    )
+    rt_latencies = VectorParam.Cycles([], "Read tag access latencies per way")
+    wt_latencies = VectorParam.Cycles([], "Write tag access latencies per way")
     response_latency = Param.Cycles("Latency for the return path on a miss")
 
     warmup_percentage = Param.Percent(

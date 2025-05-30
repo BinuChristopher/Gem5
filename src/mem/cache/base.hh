@@ -57,6 +57,7 @@
 #include "base/types.hh"
 #include "debug/Cache.hh"
 #include "debug/CachePort.hh"
+#include "debug/Packet.hh"
 #include "enums/Clusivity.hh"
 #include "mem/cache/cache_blk.hh"
 #include "mem/cache/cache_probe_arg.hh"
@@ -474,10 +475,14 @@ class BaseCache : public ClockedObject
      * @param blk The cache block that was accessed.
      * @param delay The delay until the packet's metadata is present.
      * @param lookup_lat Latency of the respective tag lookup.
+     * @param waylatencies latency of data access in each way
+     * @param taglatencies latency of tag access in each way
      * @return The number of ticks that pass due to a block access.
      */
     Cycles calculateAccessLatency(const CacheBlk* blk, const uint32_t delay,
-                                  const Cycles lookup_lat) const;
+                                  const Cycles lookup_lat,
+                                  std::vector<Cycles> waylatencies,
+                                   std::vector<Cycles> taglatencies) const;
 
     /**
      * Does all the processing necessary to perform the provided request.
@@ -980,6 +985,33 @@ class BaseCache : public ClockedObject
      * Normally this is all possible memory addresses. */
     const AddrRangeList addrRanges;
 
+    /**
+     * Hit counter for each way in the cache.
+     */
+    std::vector<int> wayHitCounter;
+
+    /**
+     * read data latencies per way.
+     */
+    std::vector<Cycles> rdLatencies;
+
+     /**
+     * write data latencies per way.
+     */
+    std::vector<Cycles> wdLatencies;
+
+     /**
+     * read tag latencies per way.
+     */
+    std::vector<Cycles> rtLatencies;
+
+     /**
+     * write tag latencies per way.
+     */
+    std::vector<Cycles> wtLatencies;
+
+    unsigned numVictimWays;
+
   public:
     /** System we are currently operating in. */
     System *system;
@@ -1016,6 +1048,12 @@ class BaseCache : public ClockedObject
         statistics::Vector missLatency;
         /** The number of accesses per command and thread. */
         statistics::Formula accesses;
+        /**
+         * Total number of ticks per thread/command spent waiting for a
+         * cache access.
+         * Used to calculate the average access latency.
+         */
+        statistics::Vector accessLatency;
         /** The miss rate per command and thread. */
         statistics::Formula missRate;
         /** The average miss latency per command and thread. */
@@ -1036,6 +1074,9 @@ class BaseCache : public ClockedObject
         statistics::Formula avgMshrMissLatency;
         /** The average latency of an MSHR miss, per command and thread. */
         statistics::Formula avgMshrUncacheableLatency;
+        statistics::Vector wayhits;
+
+
     };
 
     struct CacheStats : public statistics::Group
@@ -1074,6 +1115,10 @@ class BaseCache : public ClockedObject
         /** The number of overall accesses. */
         statistics::Formula overallAccesses;
 
+        /** Total number of ticks spent waiting for all access. */
+        statistics::Formula overallAccessLatency;
+         /** The average miss latency for all misses. */
+        statistics::Formula overallAvgAccessLatency;
         /** The miss rate of all demand accesses. */
         statistics::Formula demandMissRate;
         /** The miss rate for all accesses. */
@@ -1143,6 +1188,10 @@ class BaseCache : public ClockedObject
 
         /** Per-command statistics */
         std::vector<std::unique_ptr<CacheCmdStats>> cmd;
+
+        /** custom parameter to display way hit counts **/
+        statistics::Vector wayHitCounts;
+
     } stats;
 
     /** Registers probes. */
@@ -1310,6 +1359,55 @@ class BaseCache : public ClockedObject
     {
         assert(pkt->req->requestorId() < system->maxRequestors());
         stats.cmdStats(pkt).hits[pkt->req->requestorId()]++;
+    }
+    void incrementWayHitCounter(PacketPtr pkt, CacheBlk *blk,
+                                std::vector<int> *wayHitCounter)
+    {
+        // Check if the packet command is one of the relevant types
+        if (pkt->cmd == MemCmd::ReadReq || pkt->cmd == MemCmd::WriteReq ||
+            pkt->cmd == MemCmd::WriteLineReq
+            || pkt->cmd == MemCmd::ReadExReq
+            || pkt->cmd == MemCmd::ReadCleanReq
+            || pkt->cmd == MemCmd::ReadSharedReq
+            || pkt->cmd == MemCmd::SoftPFReq
+            || pkt->cmd == MemCmd::HardPFReq
+            || pkt->cmd == MemCmd::SoftPFExReq) {
+
+                // Get the way index of the hit block and the set index
+                int way_index = blk->getWay();
+                int set_index = blk->getSet();
+                int assoc = wayHitCounter->size();
+                assert(pkt->req->requestorId() < system->maxRequestors());
+                int requestor_id = pkt->req->requestorId();
+
+                if (way_index >= 0 && way_index < assoc) {
+                // Increment the element at the specified index
+                (*wayHitCounter)[way_index]++;
+                stats.wayHitCounts[way_index]++;
+
+                // Calculate flattened index
+                int flat_index = requestor_id * assoc + way_index;
+                // Increment the appropriate entry
+                stats.cmdStats(pkt).wayhits[flat_index]++;
+
+                std::ostringstream way_counts;
+                    way_counts << "Way hit counts: [";
+                    for (int i = 0; i < assoc; ++i) {
+                        way_counts << (*wayHitCounter)[i];
+                        if (i < assoc - 1) {
+                            way_counts << ", ";
+                        }
+                    }
+                    way_counts << "]";
+
+                    //Print cache level, way, and hit information
+                    DPRINTF(Packet, "Way: %d,Set: %d, %s, Hit on %s
+                    for %s\n", way_index, set_index, way_counts.str().c_str(),
+                     pkt->print(),
+                     blk->print());
+                    }
+
+            }
     }
 
     /**

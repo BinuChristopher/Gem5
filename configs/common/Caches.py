@@ -51,11 +51,13 @@ from gem5.isas import ISA
 
 class L1Cache(Cache):
     assoc = 2
-    tag_latency = 2
-    data_latency = 2
+    tag_latency = 5
+    data_latency = 10
     response_latency = 2
     mshrs = 4
     tgts_per_mshr = 20
+    # sequential_access = True
+    sequential_access = False
 
 
 class L1_ICache(L1Cache):
@@ -69,25 +71,33 @@ class L1_DCache(L1Cache):
 
 
 class L2Cache(Cache):
-    assoc = 4
-    tag_latency = 8
-    data_latency = 8
-    response_latency = 12
+    assoc = 2
+    tag_latency = 4
+    data_latency = 4
+    response_latency = 20
     mshrs = 20
     tgts_per_mshr = 20
     write_buffers = 8
     clusivity = "mostly_incl"
+    sequential_access = True
+    # sequential_access = False
+    # numVictimWays = 1
+
+
+# refer to src/mem/cache/Cache.py for available params
 
 
 class L3Cache(Cache):
-    assoc = 16
-    tag_latency = 32
-    data_latency = 32
-    response_latency = 32
+    assoc = 2
+    tag_latency = 4
+    data_latency = 0
+    response_latency = 100
     mshrs = 512
     tgts_per_mshr = 24
     write_buffers = 256
     clusivity = "mostly_incl"
+    sequential_access = True
+    # sequential_access = False
 
 
 class IOCache(Cache):

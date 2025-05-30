@@ -79,6 +79,7 @@ class BaseTags(ClockedObject):
     entry_size = Param.Int(
         Parent.cache_line_size, "Indexing entry size in bytes"
     )
+    numVictimWays = Param.Int(Parent.numVictimWays, "Number of victim ways")
 
 
 class BaseSetAssoc(BaseTags):

@@ -1,5 +1,5 @@
 
- ## Tracking functionalities added to the dev branch of fork repository
+ ## Addition of functionalities to the dev branch of the forked repository
  * Added Cache level 3 to se.py, caches.py, cacheconfig.py, options.py
  * Resolve fast forward error in Simulation.py - atomic CPU
  * Added way wise read and write latencies for tag and data separtely in cache

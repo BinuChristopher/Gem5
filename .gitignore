@@ -35,4 +35,5 @@ configs/dram/lowp_sweep.cfg
 .vscode
 typings
 program/
-automate_defaultConfig/
+automate_defaultConfig_spec2006/
+Spec_2017

@@ -1401,8 +1401,8 @@ class BaseCache : public ClockedObject
                     way_counts << "]";
 
                     //Print cache level, way, and hit information
-                    DPRINTF(Packet, "Way: %d,Set: %d, %s, Hit on %s
-                    for %s\n", way_index, set_index, way_counts.str().c_str(),
+                    DPRINTF(Packet, "Way: %d,Set: %d, %s, Hit on %s for %s\n",
+                     way_index, set_index, way_counts.str().c_str(),
                      pkt->print(),
                      blk->print());
                     }

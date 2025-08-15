@@ -308,8 +308,8 @@ BaseCache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time)
         pkt->makeTimingResponse();
 
 
-        DPRINTF(ResponseLat, "In %s function %s pkt: %s, requestTime: %u,
-        reqtime(cycles): %u  --- 1\n",name(),__func__,
+        DPRINTF(ResponseLat, "In %s function %s pkt: %s, requestTime: %u,"
+        "reqtime(cycles): %u  --- 1\n",name(),__func__,
         pkt->print(), request_time, ticksToCycles(request_time));
         // In this case we are considering request_time that takes
         // into account the delay of the xbar, if any, and just

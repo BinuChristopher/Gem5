@@ -378,15 +378,15 @@ Cache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time)
 
     //Fordebugging
     if (pkt->isRead() || pkt->isWrite()) {
-        DPRINTF(CacheModified, "Got hit on packet: %#llx |
-         type: %s | size: %d | instruction addr: %#llx |
-          virtual addr: %#llx | physical addr: %#llx\n",
+        DPRINTF(CacheModified, "Got hit on packet: %#llx |"
+         "type: %s | size: %d | instruction addr: %#llx |"
+          "virtual addr: %#llx | physical addr: %#llx\n",
            pkt->getAddr(), pkt->cmdString(), (int)pkt->getSize(),
             pkt->req->hasPC() ? pkt->req->getPC() : 0,
              pkt->req->hasVaddr() ? pkt->req->getVaddr() : 0,
               pkt->req->hasPaddr() ? pkt->req->getPaddr() : 0);
-        DPRINTF(CacheModified, "Cache line info: tag: %x |
-         set: %d | way: %d | offset: %ld | index: %ld\n",
+        DPRINTF(CacheModified, "Cache line info: tag: %x |"
+         "set: %d | way: %d | offset: %ld | index: %ld\n",
           blk->getTag(), (int)blk->getSet(), (int)blk->getWay(),
            (long)pkt->getOffset(blkSize),
            ((int)blk->getSet() * (int)tags->indexingPolicy->assoc)
@@ -512,9 +512,9 @@ Cache::handleTimingReqMiss(PacketPtr pkt, CacheBlk *blk, Tick forward_time,
     }
 
 //For debugging
-    DPRINTF(CacheModified, "Got miss on packet: %#llx |
-     type: %s | size: %d | instruction addr: %#llx |
-      virtual addr: %#llx | physical addr: %#llx\n",
+    DPRINTF(CacheModified, "Got miss on packet: %#llx |"
+     "type: %s | size: %d | instruction addr: %#llx |"
+      "virtual addr: %#llx | physical addr: %#llx\n",
       pkt->getAddr(), pkt->cmdString(), (int)pkt->getSize(),
        pkt->req->hasPC() ? pkt->req->getPC() : 0,
         pkt->req->hasVaddr() ? pkt->req->getVaddr() : 0,
@@ -579,9 +579,9 @@ Cache::recvTimingReq(PacketPtr pkt)
 
     //for debugging
     if (pkt->isRead() || pkt->isWrite()) {
-            DPRINTF(CacheModified, "Got data request on packet: %#llx
-            | type: %s | size: %d | instruction addr: %#llx |
-             virtual addr: %#llx | physical addr: %#llx\n",
+            DPRINTF(CacheModified, "Got data request on packet: %#llx"
+            "| type: %s | size: %d | instruction addr: %#llx |"
+             "virtual addr: %#llx | physical addr: %#llx\n",
               pkt->getAddr(), pkt->cmdString(), (int)pkt->getSize(),
                pkt->req->hasPC() ? pkt->req->getPC() : 0,
                 pkt->req->hasVaddr() ? pkt->req->getVaddr() : 0,

@@ -161,6 +161,20 @@ class BaseIndexingPolicy : public SimObject
      */
     virtual Addr regenerateAddr(const Addr tag, const ReplaceableEntry* entry)
                                                                     const = 0;
+
+    /**
+     * Swap two block pointers within a set and update their way metadata.
+     * Only valid for indexing policies that support explicit way mapping
+     * (e.g., set-associative).
+     *
+     * @param set The set index where the swap occurs.
+     * @param way1 First way index to be swapped.
+     * @param way2 Second way index to be swapped.
+     */
+    virtual void swapWaysInSet(int set, int way1, int way2) {
+        panic("swapWaysInSet not implemented for this indexing policy");
+    }
+
 };
 
 } // namespace gem5

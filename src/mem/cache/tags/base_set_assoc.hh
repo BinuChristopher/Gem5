@@ -180,6 +180,17 @@ class BaseSetAssoc : public BaseTags
         CacheBlk* victim = static_cast<CacheBlk*>(replacementPolicy->getVictim(
                                 entries));
 
+        //Binu: If victim in way 0 let it as is, if not in way 0, swap the contents in way0 to victim block's way only for L2 level
+        // if (this->name().find("l2") != std::string::npos) {
+        //     for (const auto& candidate : entries) {
+        //         // Update victim entry if necessary
+        //         if ((candidate->getWay() == 0) && (victim->getWay() != 0)){
+        //             indexingPolicy->swapWaysInSet( victim->getSet(), 0, victim->getWay());
+        //         }
+        //     }
+
+        // }
+
         // There is only one eviction for this replacement
         evict_blks.push_back(victim);
 

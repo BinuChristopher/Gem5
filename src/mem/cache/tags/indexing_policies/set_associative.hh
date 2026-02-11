@@ -127,6 +127,16 @@ class SetAssociative : public BaseIndexingPolicy
      */
     Addr regenerateAddr(const Addr tag, const ReplaceableEntry* entry) const
                                                                    override;
+
+    /**
+     * Swap two block pointers within a set and update their way metadata.
+     *
+     * @param set The set index where the swap occurs.
+     * @param way1 Index of the first block to swap.
+     * @param way2 Index of the second block to swap.
+     */
+    void swapWaysInSet(int set, int way1, int way2) override;
+
 };
 
 } // namespace gem5

@@ -47,6 +47,7 @@
 #include "mem/cache/tags/indexing_policies/set_associative.hh"
 
 #include "mem/cache/replacement_policies/replaceable_entry.hh"
+#include "mem/cache/cache_blk.hh"
 
 namespace gem5
 {
@@ -73,6 +74,18 @@ std::vector<ReplaceableEntry*>
 SetAssociative::getPossibleEntries(const Addr addr) const
 {
     return sets[extractSet(addr)];
+}
+
+void
+SetAssociative::swapWaysInSet(int set, int way1, int way2)
+{
+    auto* blk1 = static_cast<CacheBlk*>(sets[set][way1]);
+    auto* blk2 = static_cast<CacheBlk*>(sets[set][way2]);
+
+    std::swap(sets[set][way1], sets[set][way2]);
+
+    blk1->setPosition(set, way2);
+    blk2->setPosition(set, way1);
 }
 
 } // namespace gem5

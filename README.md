@@ -7,3 +7,4 @@
  * Added Python script for automating simulation with benchmarks
  * New inputs to cache for way-specific read and write latencies
  * Support to add an odd number of cache ways (--numVictimWays)
+ * Swap ways in a set function added
